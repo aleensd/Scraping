@@ -11,7 +11,7 @@ async def main() -> None:
     scraper = Scraper(url, driver_path)
     source = scraper.fetch_page_source()
     scraper.extract_pdf_urls(source)
-    await scraper.save_metadata_to_csv()
+    await scraper.download_latest_pdfs()
     end = time.time()
     print(end - start)
 

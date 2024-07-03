@@ -4,11 +4,13 @@ import aiohttp
 import pandas as pd
 from selenium import webdriver
 from bs4 import BeautifulSoup
+
 from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.chrome.options import Options
 
 from helpers.split_utils import split_and_divide
 
@@ -21,18 +23,37 @@ class Scraper:
         self.metadata_list = []
         self.pdf_base_url = "https://www.domstol.se"
         # Initialize the webdriver with the specified path
-        options = webdriver.ChromeOptions()
-        options.add_argument('--headless')
-        options.add_argument('--disable-gpu')
+        self.options = Options()
+        self.options = webdriver.ChromeOptions()
+        self.options.add_argument('--headless')
+        self.options.add_argument('--disable-gpu')
         # options.add_argument('--incognito')
         # options.add_argument('start-maximized')
-        options.add_argument('--window-size=1920,1080')
-        self.driver = webdriver.Chrome(service=Service(executable_path=self.driver_path), options=options)
+        self.options.add_argument('--window-size=1920,1080')
+        # Download options
+        self.options.add_experimental_option('prefs', {
+            "download.default_directory": '/home/aleensd/Desktop/kedra/Scraping/pdfs',
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "plugins.always_open_pdf_externally": True
+        }
+                                        )
+        self.driver = None
+        self.init_driver()
+
+    def init_driver(self):
+        if self.driver is None:
+            self.driver = webdriver.Chrome(service=Service(executable_path=self.driver_path), options=self.options)
+            print("Driver initialized")
 
     def quit_driver(self):
-        self.driver.quit()
+        if self.driver:
+            self.driver.quit()
+            self.driver = None
+            print("Driver quit")
 
     def fetch_page_source(self) -> str:
+        self.init_driver()
         self.driver.get(self.url)
         time.sleep(5)
         # Wait until the element is present and click the link
@@ -105,6 +126,18 @@ class Scraper:
             self.metadata_list = [result for result in results if result]  # Filter out None results
             df = pd.DataFrame(self.metadata_list)
             df.to_csv('metadata.csv', index=False)
+
+    async def download_latest_pdfs(self) -> None:
+        tasks = [self.open_pdf(url) for url in self.pdf_urls[:10]]
+        await asyncio.gather(*tasks)
+
+    async def open_pdf(self, pdf_url) -> None:
+        self.init_driver()
+        self.driver.get(pdf_url)
+        link_block = WebDriverWait(self.driver, 10).until(
+            EC.element_to_be_clickable((By.CLASS_NAME, "link-block__link"))
+        )
+        link_block.click()
 
     @staticmethod
     def extract_value_list_content(soup, title, type="text") -> str | None:
