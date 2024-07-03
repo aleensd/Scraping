@@ -1,9 +1,20 @@
+import asyncio
+import time
+
 from Scraper.scraper import Scraper
 
-if __name__ == '__main__':
+
+async def main() -> None:
+    start = time.time()
     url = "https://www.domstol.se/hogsta-domstolen/"
     driver_path = "/usr/bin/chromedriver"
     scraper = Scraper(url, driver_path)
-    source=scraper.fetch_page_source()
+    source = scraper.fetch_page_source()
     scraper.extract_pdf_urls(source)
-    print(scraper.pdf_urls)
+    await scraper.save_metadata_to_csv()
+    end = time.time()
+    print(end - start)
+
+
+if __name__ == '__main__':
+    asyncio.run(main())
