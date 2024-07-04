@@ -1,13 +1,9 @@
 # Scraping
 
----
-
 ## About this project
 
----
 A scraper for one of Sweden's premier legal to scrape PDF URLs and metadata from this website https://www.domstol.se/hogsta-domstolen/avgoranden/.
 
----
 ## Prerequisites
 
 - Python 3.11
