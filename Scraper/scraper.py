@@ -1,4 +1,5 @@
 import asyncio
+import json
 import time
 import aiohttp
 import pandas as pd
@@ -25,68 +26,55 @@ class Scraper:
         self.url = Config().url
         self.driver_path = Config().driver_path
         self.pdf_urls = []
-        self.metadata_list = []
         self.pdf_base_url = Config().pdf_base_url
         # Initialize the webdriver with the specified path
         self.options = Options()
         self.options = webdriver.ChromeOptions()
         self.options.add_argument('--headless')
         self.options.add_argument('--disable-gpu')
-        # options.add_argument('--incognito')
-        # options.add_argument('start-maximized')
-        self.options.add_argument('--window-size=1920,1080')
+        # self.options.add_argument('--incognito')
+        self.options.add_argument('start-maximized')
+        # self.options.add_argument('--window-size=1920,1080')
         # Download options
         self.options.add_experimental_option('prefs', {
             "download.default_directory": Config().download_default_directory,
             "download.prompt_for_download": False,
             "download.directory_upgrade": True,
             "plugins.always_open_pdf_externally": True
-        }
-                                             )
+        })
         self.driver = None
         self.init_driver()
 
     def init_driver(self):
         if self.driver is None:
-            logger.info('Initialize driver')
             self.driver = webdriver.Chrome(service=Service(executable_path=self.driver_path), options=self.options)
             logger.debug('driver initialized')
 
     def quit_driver(self):
         if self.driver:
-            logger.info('quit driver')
             self.driver.quit()
             self.driver = None
             logger.debug('driver quit')
 
     def apply_filters(self):
         # Click the dropdown to expand it
-        dropdown = WebDriverWait(self.driver, 5).until(
+        WebDriverWait(self.driver, 5).until(
             EC.element_to_be_clickable((By.ID, "AvgörandetypFilter_dropdown_trigger"))
-        )
-        dropdown.click()
+        ).click()
         logger.debug('Avgorandetype filter clicked!')
 
-        prejudikat_checkbox = WebDriverWait(self.driver, 10).until(
+        WebDriverWait(self.driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//label[@title='Prejudikat']"))
-        )
-        prejudikat_checkbox.click()
+        ).click()
 
-        begarnom_checkbox = WebDriverWait(self.driver, 5).until(
+        WebDriverWait(self.driver, 5).until(
             EC.element_to_be_clickable((By.XPATH, "//label[@title='Begäran om förhandsavgörande']"))
-        )
-        begarnom_checkbox.click()
+        ).click()
 
     def fetch_page_source(self) -> str:
         self.init_driver()
         self.driver.get(self.url)
         time.sleep(2)
-        # Wait until the element is present and click the link
-        avgoranden_link = WebDriverWait(self.driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//a[@href='/hogsta-domstolen/avgoranden/']"))
-        )
-        avgoranden_link.click()
-
         self.apply_filters()
         logger.debug('filters applied')
         time.sleep(2)
@@ -96,7 +84,7 @@ class Scraper:
                                            "@data-testid='HeadingSelector']")
         text = element.get_attribute('innerText')
         max_clicks = split_and_divide(text)
-        logger.info('Number of loops to extract all pdf urls: %s',max_clicks)
+        logger.info('Number of loops to extract all pdf urls: %s', max_clicks)
 
         # Load all content by clicking 'Show More' button until it disappears
         for _ in range(max_clicks):
@@ -105,8 +93,8 @@ class Scraper:
                     EC.element_to_be_clickable((By.XPATH, "//button[@title='Visa mer']"))
                 )
                 ActionChains(self.driver).move_to_element(show_more).click(show_more).perform()
-            except:
-                logger.debug('show more button not found')
+            except Exception as e:
+                logger.debug('show more button not found: %s', e)
                 break
 
         page_source = self.driver.page_source
@@ -115,11 +103,10 @@ class Scraper:
 
     def extract_pdf_urls(self, page_source) -> None:
         soup = BeautifulSoup(page_source, 'html.parser')
-        for link in soup.find_all('a', class_='search-result-item', href=True):
+        for link in soup.find_all('a', class_='search-result-item', attrs={'data-testid': 'SearchResultItem'},
+                                  href=True):
             href = link['href']
-            title = link.get('title', '')
-            if 'Mål:' in title:
-                self.pdf_urls.append(self.pdf_base_url + href)
+            self.pdf_urls.append(self.pdf_base_url + href)
 
     @staticmethod
     async def get_pdf_content(session, pdf_url) -> str:
@@ -128,10 +115,9 @@ class Scraper:
                 response.raise_for_status()
                 return await response.text()
         except Exception as e:
-            logger.error(f"Failed to download PDF from {pdf_url}: {e}")
-            return None
+            logger.error(f"Failed to get PDF content from {pdf_url}: {e}")
 
-    async def extract_pdf_metadata(self, session, pdf_url):
+    async def extract_pdf_metadata(self, session, pdf_url) -> dict:
         content = await self.get_pdf_content(session, pdf_url)
         if content:
             soup = BeautifulSoup(content, 'html.parser')
@@ -150,18 +136,29 @@ class Scraper:
 
     async def save_metadata_to_json(self) -> None:
         async with aiohttp.ClientSession() as session:
-            logger.info('Save pdf metadata to json')
-            tasks = [self.extract_pdf_metadata(session, url) for url in self.pdf_urls]
-            results = await asyncio.gather(*tasks)
-            self.metadata_list = [result for result in results if result]  # Filter out None results
-            df = pd.DataFrame(self.metadata_list)
-            # df.to_csv('metadata.csv', index=False)
-            df.to_json('metadata.json', orient='records', force_ascii=False)
+            logger.info('Saving %s pdfs metadata to json', len(self.pdf_urls))
+
+            # tasks = [self.extract_pdf_metadata(session, url) for url in self.pdf_urls]
+            # results = await asyncio.gather(*tasks)
+            # self.metadata_list = [result for result in results if result]
+            metadata_list = []
+            for url in self.pdf_urls:
+                metadata = await self.extract_pdf_metadata(session, url)
+                metadata_list.append(metadata)
+
+            df = pd.DataFrame(metadata_list)
+            df.to_csv('metadata.csv', index=False)
+            # df.to_json('metadata.json', orient='records', lines=True, force_ascii=False)
+            with open('metadata.json', 'w', encoding='utf-8') as f:
+                json.dump(metadata_list, f, ensure_ascii=False)
 
     async def download_latest_pdfs(self) -> None:
         self.init_driver()
-        tasks = [self.download_pdf(url) for url in self.pdf_urls[:10]]
-        await asyncio.gather(*tasks)
+        try:
+            tasks = [self.download_pdf(url) for url in self.pdf_urls[:10]]
+            await asyncio.gather(*tasks)
+        finally:
+            self.quit_driver()
 
     async def download_pdf(self, pdf_url) -> None:
         try:
@@ -181,25 +178,15 @@ class Scraper:
             parent_div = anchor_div.find_parent('div', class_='preheading--small')
             if type == 'text':
                 div = parent_div.find_next_sibling('div', class_='value-list', attrs={'data-testid': 'ValueList'})
-                return div.text.strip()
-            if type == 'li':
-                values = []
+                return div.text.strip() if div else None
+            elif type == 'li':
                 ul_element = parent_div.find_next_sibling('ul', class_='value-list value-list--unordered',
                                                           attrs={'data-testid': 'ValueListUnordered'})
-                if ul_element:
-                    li_elements = ul_element.find_all('li', class_='value-list__item')
-                    for li in li_elements:
-                        values.append(li.text.strip())
-                    return values
-                return None
-            else:
-                values = []
+                return [li.text.strip() for li in
+                        ul_element.find_all('li', class_='value-list__item')] if ul_element else None
+            elif type == 'link':
                 div = parent_div.find_next_sibling('div', class_='value-list', attrs={'data-testid': 'LinkList'})
-                links = div.find_all('a', class_='link', attrs={'data-testid': 'Link'})
-                for link in links:
-                    # values.append(link.find('span', class_='link__label').text.strip())
-                    values.append(link['href'])
-                return values
-
+                return [link['href'] for link in
+                        div.find_all('a', class_='link', attrs={'data-testid': 'Link'})] if div else None
         else:
             return None

@@ -5,3 +5,4 @@ PyPDF2==3.0.1
 pandas==2.2.2
 aiohttp==3.9.5
 python-dotenv==1.0.1
+tenacity==8.4.2
