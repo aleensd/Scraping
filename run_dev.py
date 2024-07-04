@@ -1,6 +1,8 @@
 import asyncio
 import time
+from dotenv import load_dotenv
 
+load_dotenv('.env')
 from Scraper.scraper import Scraper
 
 

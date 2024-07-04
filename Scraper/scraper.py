@@ -13,8 +13,11 @@ from selenium.webdriver.common.action_chains import ActionChains
 from selenium.webdriver.chrome.options import Options
 
 from config import Config
+from helpers.app_logger import get_logger
 from helpers.check_element_utils import check_exists_by_class_name
 from helpers.split_utils import split_and_divide
+
+logger = get_logger(__name__)
 
 
 class Scraper:
@@ -45,14 +48,16 @@ class Scraper:
 
     def init_driver(self):
         if self.driver is None:
+            logger.info('Initialize driver')
             self.driver = webdriver.Chrome(service=Service(executable_path=self.driver_path), options=self.options)
-            print("Driver initialized")
+            logger.debug('driver initialized')
 
     def quit_driver(self):
         if self.driver:
+            logger.info('quit driver')
             self.driver.quit()
             self.driver = None
-            print("Driver quit")
+            logger.debug('driver quit')
 
     def apply_filters(self):
         # Click the dropdown to expand it
@@ -60,6 +65,7 @@ class Scraper:
             EC.element_to_be_clickable((By.ID, "AvgörandetypFilter_dropdown_trigger"))
         )
         dropdown.click()
+        logger.debug('Avgorandetype filter clicked!')
 
         prejudikat_checkbox = WebDriverWait(self.driver, 10).until(
             EC.element_to_be_clickable((By.XPATH, "//label[@title='Prejudikat']"))
@@ -82,6 +88,7 @@ class Scraper:
         avgoranden_link.click()
 
         self.apply_filters()
+        logger.debug('filters applied')
         time.sleep(2)
 
         element = self.driver.find_element(By.XPATH,
@@ -89,6 +96,7 @@ class Scraper:
                                            "@data-testid='HeadingSelector']")
         text = element.get_attribute('innerText')
         max_clicks = split_and_divide(text)
+        logger.info('Number of loops to extract all pdf urls: %s',max_clicks)
 
         # Load all content by clicking 'Show More' button until it disappears
         for _ in range(max_clicks):
@@ -98,7 +106,7 @@ class Scraper:
                 )
                 ActionChains(self.driver).move_to_element(show_more).click(show_more).perform()
             except:
-                print('break')
+                logger.debug('show more button not found')
                 break
 
         page_source = self.driver.page_source
@@ -120,7 +128,7 @@ class Scraper:
                 response.raise_for_status()
                 return await response.text()
         except Exception as e:
-            print(f"Failed to download PDF from {pdf_url}: {e}")
+            logger.error(f"Failed to download PDF from {pdf_url}: {e}")
             return None
 
     async def extract_pdf_metadata(self, session, pdf_url):
@@ -142,6 +150,7 @@ class Scraper:
 
     async def save_metadata_to_json(self) -> None:
         async with aiohttp.ClientSession() as session:
+            logger.info('Save pdf metadata to json')
             tasks = [self.extract_pdf_metadata(session, url) for url in self.pdf_urls]
             results = await asyncio.gather(*tasks)
             self.metadata_list = [result for result in results if result]  # Filter out None results
@@ -151,16 +160,19 @@ class Scraper:
 
     async def download_latest_pdfs(self) -> None:
         self.init_driver()
-        tasks = [self.open_pdf(url) for url in self.pdf_urls[:10]]
+        tasks = [self.download_pdf(url) for url in self.pdf_urls[:10]]
         await asyncio.gather(*tasks)
 
-    async def open_pdf(self, pdf_url) -> None:
-        self.driver.get(pdf_url)
-        if check_exists_by_class_name(self.driver, "link-block__link"):
-            link_block = WebDriverWait(self.driver, 10).until(
-                EC.element_to_be_clickable((By.CLASS_NAME, "link-block__link"))
-            )
-            link_block.click()
+    async def download_pdf(self, pdf_url) -> None:
+        try:
+            self.driver.get(pdf_url)
+            if check_exists_by_class_name(self.driver, "link-block__link"):
+                link_block = WebDriverWait(self.driver, 10).until(
+                    EC.element_to_be_clickable((By.CLASS_NAME, "link-block__link"))
+                )
+                link_block.click()
+        except Exception as e:
+            logger.error(f"Error downloading PDF from {pdf_url}: {e}")
 
     @staticmethod
     def extract_value_list_content(soup, title, type="text") -> str | list[str] | None:
@@ -187,7 +199,6 @@ class Scraper:
                 for link in links:
                     # values.append(link.find('span', class_='link__label').text.strip())
                     values.append(link['href'])
-                print(values)
                 return values
 
         else:
