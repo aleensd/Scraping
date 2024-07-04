@@ -155,7 +155,7 @@ class Scraper:
     async def download_latest_pdfs(self) -> None:
         self.init_driver()
         try:
-            tasks = [self.download_pdf(url) for url in self.pdf_urls[:10]]
+            tasks = [self.download_pdf(url) for url in self.pdf_urls[:11]]
             await asyncio.gather(*tasks)
         finally:
             self.quit_driver()
